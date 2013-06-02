@@ -187,7 +187,7 @@ err:
   EC_POINT_free(h);
   EC_POINT_free(t);
   EC_POINT_free(zz);
-  EC_GROUP_free(group); // CRASH
+  EC_GROUP_free(group);
   return ret;
 }
 
@@ -236,7 +236,7 @@ int LSAGS_verify(const void* pks, const size_t pks_size, const void* msg, const 
   int i; for (i=0; i<n; ++i) {
     // FIXME: error handling?
     BN_bin2bn(sig+ LSAGS_PK_SIZE + (1+i)*LSAGS_SK_SIZE, LSAGS_SK_SIZE, s); 
-    LSAGS_c_round_MACRO; // CRASH
+    LSAGS_c_round_MACRO;
   }
 
   unsigned char computed_c_raw[LSAGS_SK_SIZE];
@@ -269,8 +269,8 @@ int main () {
   if (sig == NULL) goto err;
 
   if(!LSAGS_sign(pks, 2*LSAGS_PK_SIZE, sk, 1, "ABCD1234", 8, "FISH", 4, sig, NULL)) goto err;
-  if(!LSAGS_verify(pks, 2*LSAGS_PK_SIZE, "ABCD1234", 8, "FISH", 4, sig, NULL)) printf("Verification failed :(\n");
-  else printf("Signature verified ok :)\n");
+  int ok = LSAGS_verify(pks, 2*LSAGS_PK_SIZE, "ABCD1234", 8, "FISH", 4, sig, NULL);
+  assert(ok); // FIXME: fails randomly with p > 1/100
   exit(0);
 err:
   exit(1);
