@@ -5,7 +5,6 @@
 
 #include <stdio.h>
 #include <assert.h>
-// FIXME: #include <memory.h>
 
 #define LSAGS_SK_SIZE 28
 #define LSAGS_PK_SIZE 29
@@ -62,187 +61,82 @@ err:
   return ret;
 }
 
-
-int LSAGS_logh(BIGNUM* log_h, const unsigned char* pks, const size_t pks_size,
-                              const unsigned char* tag, const unsigned char tag_size,
-                              const EC_GROUP* group, BN_CTX* ctx) {
-  int ret = 0;
-  BN_CTX_start(ctx);
-  BIGNUM* q = BN_CTX_get(ctx); if (q == NULL) goto err;
-  if (!EC_GROUP_get_order(group, q, ctx)) goto err;
-
-  SHA256_CTX hash_ctx; if(!SHA256_Init(&hash_ctx)) goto err;    
-  if(!SHA256_Update(&hash_ctx, "G", 1)) goto err; // different hashing
-  if(!SHA256_Update(&hash_ctx, &tag_size, 1)) goto err; // reversible encoding
-  if(!SHA256_Update(&hash_ctx, tag, tag_size)) goto err;
-  if(!SHA256_Update(&hash_ctx, pks, pks_size)) goto err;
-  if(!BN_SHA256_range(log_h, q, hash_ctx)) goto err;
-
-  ret = 1;
-  BN_CTX_end(ctx);
-err:
-  return ret;
-}
 int LSAGS_hLym(unsigned char* hLym, const int n, const unsigned char* pks,
                const size_t pks_size, const unsigned char* y_tilde_raw,
                const unsigned char* msg, const size_t msg_size) {
-  SHA256_CTX hash_ctx; if(!SHA256_Init(&hash_ctx)) goto err;
+  SHA256_CTX hash_ctx; if(!SHA256_Init(&hash_ctx)) return 0;
   char n_le[4]; // little-endian size of pks
-  n_le[0]=n&0xff; n_le[1]=n&(0xff<<8); n_le[2]=n&(0xff<<16); n_le[3]=n&(0xff<<24);
-  if(!SHA256_Update(&hash_ctx, n_le, 4)) goto err; // reversible encoding...
-  if(!SHA256_Update(&hash_ctx, pks, pks_size)) goto err;
-  if(!SHA256_Update(&hash_ctx, y_tilde_raw, LSAGS_PK_SIZE)) goto err;
-  if(!SHA256_Update(&hash_ctx, msg, msg_size)) goto err;
-  if(!SHA256_Final(hLym, &hash_ctx)) goto err;
-
+  n_le[0]=n&0xff; n_le[1]=(n>>8)&0xff; n_le[2]=(n>>16)&0xff; n_le[3]=(n>>24)&0xff;
+  if(!SHA256_Update(&hash_ctx, n_le, 4)) return 0; // reversible encoding...
+  if(!SHA256_Update(&hash_ctx, pks, pks_size)) return 0;
+  if(!SHA256_Update(&hash_ctx, y_tilde_raw, LSAGS_PK_SIZE)) return 0;
+  if(!SHA256_Update(&hash_ctx, msg, msg_size)) return 0;
+  if(!SHA256_Final(hLym, &hash_ctx)) return 0;
   return 1;
-err:
-  return 0;
 }
 
-int LSAGS_c_combine(BIGNUM* c, const EC_GROUP* group, const unsigned char* hLym,
-                    const EC_POINT* z, const EC_POINT* zz, BN_CTX* ctx) {
-  int ret = 0;
-  unsigned char z_raw[LSAGS_PK_SIZE], zz_raw[LSAGS_PK_SIZE];
-  {int i; for (i=0; i<LSAGS_PK_SIZE; ++i) z_raw[i] = zz_raw[i] = 0;}
-  BN_CTX_start(ctx);
-  BIGNUM* q = BN_CTX_get(ctx); if (q == NULL) goto err;
-  if (!EC_GROUP_get_order(group, q, ctx)) goto err;
-  if (!EC_POINT_point2oct(group, z, POINT_CONVERSION_COMPRESSED,
-        z_raw, LSAGS_PK_SIZE, ctx)) goto err;
-  if (!EC_POINT_point2oct(group, zz, POINT_CONVERSION_COMPRESSED,
-        zz_raw, LSAGS_PK_SIZE, ctx)) goto err;
-  SHA256_CTX hash_ctx; if(!SHA256_Init(&hash_ctx)) goto err;
-  if(!SHA256_Update(&hash_ctx, hLym, LSAGS_HASH_SIZE)) goto err;
-  if(!SHA256_Update(&hash_ctx, z_raw, LSAGS_PK_SIZE)) goto err;
-  if(!SHA256_Update(&hash_ctx, zz_raw, LSAGS_PK_SIZE)) goto err;
-  if(!BN_SHA256_range(c, q, hash_ctx)) goto err;
+#define LSAGS_logh_MACRO do {\
+  SHA256_CTX hash_ctx; if(!SHA256_Init(&hash_ctx)) goto err;\
+  if(!SHA256_Update(&hash_ctx, "G", 1)) goto err;\
+  if(!SHA256_Update(&hash_ctx, &tag_size, 1)) goto err;\
+  if(!SHA256_Update(&hash_ctx, tag, tag_size)) goto err;\
+  if(!SHA256_Update(&hash_ctx, pks, pks_size)) goto err;\
+  if(!BN_SHA256_range(log_h, q, hash_ctx)) goto err;\
+} while (0)
 
-  ret = 1;
-err:
-  BN_CTX_end(ctx);
-  return ret;
-}
+#define LSAGS_c_combine_MACRO do {\
+  unsigned char z_raw[LSAGS_PK_SIZE], zz_raw[LSAGS_PK_SIZE];\
+  {int i; for (i=0; i<LSAGS_PK_SIZE; ++i) z_raw[i] = zz_raw[i] = 0;}\
+  if (!EC_POINT_point2oct(group, z, POINT_CONVERSION_COMPRESSED,\
+        z_raw, LSAGS_PK_SIZE, ctx)) goto err;\
+  if (!EC_POINT_point2oct(group, zz, POINT_CONVERSION_COMPRESSED,\
+        zz_raw, LSAGS_PK_SIZE, ctx)) goto err;\
+  SHA256_CTX hash_ctx; if(!SHA256_Init(&hash_ctx)) goto err;\
+  if(!SHA256_Update(&hash_ctx, hLym, LSAGS_HASH_SIZE)) goto err;\
+  if(!SHA256_Update(&hash_ctx, z_raw, LSAGS_PK_SIZE)) goto err;\
+  if(!SHA256_Update(&hash_ctx, zz_raw, LSAGS_PK_SIZE)) goto err;\
+  if(!BN_SHA256_range(c, q, hash_ctx)) goto err;\
+} while (0)
 
-int LSAGS_sign(void* pks, size_t pks_size, char* sk, int pi, void* msg, size_t msg_size, void* tag, unsigned char tag_size, unsigned char* sig_out, BN_CTX* ctx) {
+#define LSAGS_c_round_MACRO do {\
+    if(!EC_POINT_oct2point(group, pk, pks + i*LSAGS_PK_SIZE, LSAGS_PK_SIZE, ctx)) goto err;\
+    if(!EC_POINT_mul(group, z, s, pk, c, ctx)) goto err;\
+    if(!EC_POINT_mul(group, t, NULL, h, s, ctx)) goto err;\
+    if(!EC_POINT_mul(group, zz, NULL, y_tilde, c, ctx)) goto err;\
+    if(!EC_POINT_add(group, zz, zz, t, ctx)) goto err;\
+    LSAGS_c_combine_MACRO;\
+} while (0)
+
+
+int LSAGS_sign(void* pks, size_t pks_size, unsigned char* sk, int pi, void* msg, size_t msg_size, void* tag, unsigned char tag_size, unsigned char* sig_out, BN_CTX* ctx) {
+  BIGNUM *x_pi=NULL, *u=NULL, *q=NULL, *c=NULL, *log_h=NULL, *s=NULL;
+  EC_POINT *y_tilde=NULL, *h=NULL, *z=NULL, *zz=NULL, *pk=NULL, *t=NULL;
+  EC_GROUP* group=NULL;
   int ret = 0;
   assert(pi >= 0);
   if (pks_size%LSAGS_PK_SIZE) goto err;
-  unsigned int n = pks_size/LSAGS_PK_SIZE;
+  int n = pks_size/LSAGS_PK_SIZE;
   if (pi >= n) goto err;
 
-  unsigned char y_tilde_raw[LSAGS_PK_SIZE], z_raw[LSAGS_PK_SIZE], zz_raw[LSAGS_PK_SIZE];
-  {int i; for (i=0; i<LSAGS_PK_SIZE; ++i) y_tilde_raw[i] = z_raw[i] = zz_raw[i] = 0;}
-
   int ctx_is_new = 0;
-  if (ctx == NULL) {ctx = BN_CTX_new(); ctx_is_new = 1;}
+  if (ctx == NULL) {
+    ctx = BN_CTX_new();
+    ctx_is_new = 1;
+  }
   if (ctx == NULL) goto err;
   BN_CTX_start(ctx);
-  BIGNUM *x_pi=BN_CTX_get(ctx), *u=BN_CTX_get(ctx), *q=BN_CTX_get(ctx),
-         *c=BN_CTX_get(ctx), *log_h=BN_CTX_get(ctx), *log_y_tilde=BN_CTX_get(ctx),
-         *log_zz=BN_CTX_get(ctx), *s=BN_CTX_get(ctx), *t=BN_CTX_get(ctx);
-  if (t == NULL) goto err;
+  x_pi = BN_CTX_get(ctx);
+  u = BN_CTX_get(ctx);
+  q = BN_CTX_get(ctx);
+  c = BN_CTX_get(ctx);
+  log_h = BN_CTX_get(ctx);
+  s = BN_CTX_get(ctx);
+  if (s == NULL) goto err;
 
-  EC_POINT *y_tilde=NULL, *z=NULL, *zz=NULL, *pk=NULL;
-  EC_GROUP* group = EC_GROUP_new_by_curve_name(NID_secp224r1);
-  if (group == NULL) goto err;
+  if ((group = EC_GROUP_new_by_curve_name(NID_secp224r1)) == NULL) goto err;
   if (!EC_GROUP_precompute_mult(group, ctx)) goto err;
   if (!EC_GROUP_get_order(group, q, ctx)) goto err;
 
-  BN_bin2bn(sk, LSAGS_SK_SIZE, x_pi); // FIXME: error handling?
-  if (!LSAGS_logh(log_h, pks, pks_size, tag, tag_size, group, ctx)) goto err;
-
-  // y_tilde = h**x_pi = g**(log_h*x_pi)
-  if (!BN_mod_mul(log_y_tilde, log_h, x_pi, q, ctx)) goto err;
-  y_tilde = EC_POINT_new(group); if (y_tilde == NULL) goto err;
-  if (!EC_POINTs_mul(group, y_tilde, log_y_tilde, 0,
-        NULL, NULL, ctx)) goto err;
-  if (!EC_POINT_point2oct(group, y_tilde, POINT_CONVERSION_COMPRESSED,
-        y_tilde_raw, LSAGS_PK_SIZE, ctx)) goto err;
-  {int i; for (i=0; i<LSAGS_PK_SIZE; ++i) sig_out[i] = y_tilde_raw[i];}
-
-  unsigned char hLym[LSAGS_HASH_SIZE];
-  if (!LSAGS_hLym(hLym, n, pks, pks_size, y_tilde_raw, msg, msg_size)) goto err;
-
-  if (!BN_rand_range(u, q)) goto err;
-
-  // z = g**u
-  z = EC_POINT_new(group); if (z == NULL) goto err;
-  if (!EC_POINTs_mul(group, z, u, 0, NULL, NULL, ctx)) goto err;
-
-  // zz = h**u = g**(log_h*u)
-  zz = EC_POINT_new(group); if (zz == NULL) goto err;
-  if (!BN_mod_mul(log_zz, log_h, u, q, ctx)) goto err;
-  if (!EC_POINTs_mul(group, zz, log_zz, 0, NULL, NULL, ctx)) goto err;
-
-  if (!LSAGS_c_combine(c, group, hLym, z, zz, ctx)) goto err;
-
-  pk = EC_POINT_new(group); if (pk == NULL) goto err;
-
-  int i = (pi + 1) % n;
-  while (i != pi) {
-    if (!BN_rand_range(s, q)) goto err;
-    if (!BN_bn2bin(s,
-          sig_out + LSAGS_PK_SIZE + (1+i)*LSAGS_SK_SIZE)) goto err;
-
-    // z = g**s * pks_i**c
-    if(!EC_POINT_oct2point(group, pk, pks + i*LSAGS_PK_SIZE, 
-          LSAGS_PK_SIZE, ctx)) goto err;
-    if(!EC_POINT_mul(group, z, s, pk, c, ctx)) goto err;
-
-    // zz = h**s * y_tilde**c = g**(log_h*s) * g**(log_y_tilde*c)
-    //    = g**(log_h*s + log_y_tilde * c)
-    // use t as a temporary variable
-    if (!BN_mod_mul(t, log_h, s, q, ctx)) goto err;
-    if (!BN_mod_mul(log_zz, log_y_tilde, c, q, ctx)) goto err;
-    if (!BN_mod_add_quick(log_zz, log_zz, t, q)) goto err;
-    if (!EC_POINTs_mul(group, zz, log_zz, 0, NULL, NULL, ctx)) goto err;
-
-    if (!LSAGS_c_combine(c, group, hLym, z, zz, ctx)) goto err;
-    if (i == 0) if (!BN_bn2bin(c, sig_out + LSAGS_PK_SIZE)) goto err;
-    i = (i + 1) % n;
-  }
-
-  // s = (u - x_pi*c) % q
-  if (!BN_mod_mul(t, x_pi, c, q, ctx)) goto err;
-  if (!BN_mod_sub_quick(s, u, t, q)) goto err;
-  if (!BN_bn2bin(s,
-      sig_out + LSAGS_PK_SIZE + LSAGS_SK_SIZE+ pi*LSAGS_SK_SIZE)) goto err;
-
-
-  ret = 1;
-err:
-  EC_POINT_free(y_tilde);
-  EC_POINT_free(pk);
-  EC_POINT_free(z);
-  EC_POINT_free(zz);
-  EC_GROUP_free(group);
-  BN_clear(x_pi);
-  BN_CTX_end(ctx);
-  if (ctx_is_new) BN_CTX_free(ctx);
-  return ret;
-}
-
-size_t LSAGS_sig_size(const size_t pks_size) {
-  return LSAGS_PK_SIZE + LSAGS_SK_SIZE * ((pks_size/LSAGS_PK_SIZE)+1);
-}
-
-int LSAGS_verify(const void* pks, const size_t pks_size, const void* msg, const size_t msg_size, const void* tag, const unsigned char tag_size, const unsigned char* sig, BN_CTX* ctx) {
-  int ret = 0;
-  if (pks_size%LSAGS_PK_SIZE) return 0;
-  int n = pks_size/LSAGS_PK_SIZE;
-
-  int ctx_is_new = 0;
-  if (ctx == NULL) {ctx = BN_CTX_new(); ctx_is_new = 1;}
-  if (ctx == NULL) goto err;
-  BN_CTX_start(ctx);
-  BIGNUM *c=BN_CTX_get(ctx), *log_h=BN_CTX_get(ctx),
-         *log_zz=BN_CTX_get(ctx), *s=BN_CTX_get(ctx);
-  if (s == NULL) goto err;
-
-  EC_GROUP* group = EC_GROUP_new_by_curve_name(NID_secp224r1);
-  if (group == NULL) goto err;
-  EC_POINT *y_tilde=NULL, *h=NULL, *t=NULL, *z=NULL, *zz=NULL, *pk=NULL;
   y_tilde = EC_POINT_new(group); if (y_tilde == NULL) goto err;
   h = EC_POINT_new(group); if (h == NULL) goto err;
   t = EC_POINT_new(group); if (t == NULL) goto err;
@@ -250,7 +144,88 @@ int LSAGS_verify(const void* pks, const size_t pks_size, const void* msg, const 
   zz = EC_POINT_new(group); if (zz == NULL) goto err;
   pk = EC_POINT_new(group); if (pk == NULL) goto err;
 
-  if (!LSAGS_logh(log_h, pks, pks_size, tag, tag_size, group, ctx)) goto err;
+  BN_bin2bn(sk, LSAGS_SK_SIZE, x_pi); // FIXME: error handling?
+  LSAGS_logh_MACRO;
+  if (!EC_POINTs_mul(group, h, log_h, 0, NULL, NULL, ctx)) goto err;
+
+  // y_tilde = h**x_pi
+  if(!EC_POINT_mul(group, y_tilde, NULL, h, x_pi, ctx)) goto err; // zz = h**u
+  if (!EC_POINT_point2oct(group, y_tilde, POINT_CONVERSION_COMPRESSED,
+        sig_out, LSAGS_PK_SIZE, ctx)) goto err;
+
+  unsigned char hLym[LSAGS_HASH_SIZE];
+  if (!LSAGS_hLym(hLym, n, pks, pks_size, sig_out, msg, msg_size)) goto err;
+
+  if (!BN_rand_range(u, q)) goto err;
+
+  if (!EC_POINTs_mul(group, z, u, 0, NULL, NULL, ctx)) goto err; // z = g**u
+  if(!EC_POINT_mul(group, zz, NULL, h, u, ctx)) goto err; // zz = h**u
+  LSAGS_c_combine_MACRO;
+  if (pi == n-1) if (!BN_bn2bin(c, sig_out + LSAGS_PK_SIZE)) goto err;
+
+  int i = pi;
+  while ((i = (i+1)%n) != pi) {
+    if (!BN_rand_range(s, q)) goto err;
+    if (!BN_bn2bin(s, sig_out + LSAGS_PK_SIZE + (1+i)*LSAGS_SK_SIZE)) goto err;
+    LSAGS_c_round_MACRO;
+    if (i == n-1) if (!BN_bn2bin(c, sig_out + LSAGS_PK_SIZE)) goto err;
+  }
+
+  // s = (u - x_pi*c) % q
+  if (!BN_mod_mul(s, x_pi, c, q, ctx)) goto err;
+  if (!BN_mod_sub_quick(s, u, s, q)) goto err;
+  if (!BN_bn2bin(s, sig_out + LSAGS_PK_SIZE + (1+pi)*LSAGS_SK_SIZE)) goto err;
+
+
+  ret = 1;
+err:
+  BN_CTX_end(ctx);
+  if (ctx_is_new) BN_CTX_free(ctx);
+  EC_POINT_free(y_tilde);
+  EC_POINT_free(pk);
+  EC_POINT_free(z);
+  EC_POINT_free(h);
+  EC_POINT_free(t);
+  EC_POINT_free(zz);
+  EC_GROUP_free(group); // CRASH
+  return ret;
+}
+
+size_t LSAGS_sig_size(const size_t pks_size) {
+  return LSAGS_PK_SIZE + LSAGS_SK_SIZE * (1+(pks_size/LSAGS_PK_SIZE));
+}
+
+int LSAGS_verify(const void* pks, const size_t pks_size, const void* msg, const size_t msg_size, const void* tag, const unsigned char tag_size, const unsigned char* sig, BN_CTX* ctx) {
+  EC_POINT *y_tilde=NULL, *h=NULL, *t=NULL, *z=NULL, *zz=NULL, *pk=NULL;
+  BIGNUM *c=NULL, *log_h=NULL, *q=NULL, *s=NULL;
+  EC_GROUP* group=NULL;
+  int ret = 0;
+  if (pks_size%LSAGS_PK_SIZE) return 0;
+  int n = pks_size/LSAGS_PK_SIZE;
+
+  int ctx_is_new = 0;
+  if (ctx == NULL) {
+    ctx = BN_CTX_new();
+    ctx_is_new = 1;
+  }
+  if (ctx == NULL) goto err;
+  BN_CTX_start(ctx);
+  c = BN_CTX_get(ctx);
+  log_h = BN_CTX_get(ctx);
+  q = BN_CTX_get(ctx);
+  s = BN_CTX_get(ctx);
+  if (s == NULL) goto err;
+
+  if ((group = EC_GROUP_new_by_curve_name(NID_secp224r1)) == NULL) goto err;
+  if (!EC_GROUP_get_order(group, q, ctx)) goto err;
+  y_tilde = EC_POINT_new(group); if (y_tilde == NULL) goto err;
+  h = EC_POINT_new(group); if (h == NULL) goto err;
+  t = EC_POINT_new(group); if (t == NULL) goto err;
+  z = EC_POINT_new(group); if (z == NULL) goto err;
+  zz = EC_POINT_new(group); if (zz == NULL) goto err;
+  pk = EC_POINT_new(group); if (pk == NULL) goto err;
+
+  LSAGS_logh_MACRO;
   if (!EC_POINTs_mul(group, h, log_h, 0, NULL, NULL, ctx)) goto err;
   if (!EC_POINT_oct2point(group, y_tilde, sig, LSAGS_PK_SIZE, ctx)) goto err;
   BN_bin2bn(sig+LSAGS_PK_SIZE, LSAGS_SK_SIZE, c); // FIXME: error handling?
@@ -259,20 +234,9 @@ int LSAGS_verify(const void* pks, const size_t pks_size, const void* msg, const 
   if (!LSAGS_hLym(hLym, n, pks, pks_size, sig, msg, msg_size)) goto err;
 
   int i; for (i=0; i<n; ++i) {
-    BN_bin2bn(sig+ LSAGS_PK_SIZE + (1+i)*LSAGS_SK_SIZE,
-        LSAGS_SK_SIZE, s); // FIXME: error handling?
-
-    // z = g**s * pks_i**c
-    if(!EC_POINT_oct2point(group, pk, pks + i*LSAGS_PK_SIZE, 
-          LSAGS_PK_SIZE, ctx)) goto err;
-    if(!EC_POINT_mul(group, z, s, pk, c, ctx)) goto err;
-
-    // zz = h**s * y_tilde**c      t=h**s
-    if(!EC_POINT_mul(group, t, NULL, h, s, ctx)) goto err;
-    if(!EC_POINT_mul(group, zz, NULL, y_tilde, c, ctx)) goto err;
-    if(!EC_POINT_add(group, zz, zz, t, ctx)) goto err; 	
-
-    if (!LSAGS_c_combine(c, group, hLym, z, zz, ctx)) goto err;
+    // FIXME: error handling?
+    BN_bin2bn(sig+ LSAGS_PK_SIZE + (1+i)*LSAGS_SK_SIZE, LSAGS_SK_SIZE, s); 
+    LSAGS_c_round_MACRO; // CRASH
   }
 
   unsigned char computed_c_raw[LSAGS_SK_SIZE];
@@ -296,31 +260,17 @@ err:
 
 
 int main () {
-  BIGNUM *r=NULL, *range=NULL;
-  r = BN_new(); if (r == NULL) goto err;
-  range = BN_new(); if (range == NULL) goto err;
-  if (!BN_dec2bn(&range, "150")) goto err;
-  SHA256_CTX hash_ctx; if (!SHA256_Init(&hash_ctx)) goto err;
-  if(!SHA256_Update(&hash_ctx, "kala", 4)) goto err;
-  BN_SHA256_range(r, range, hash_ctx);
-  printf("0x");
-  BN_print_fp(stdout, r); // 0x92 = 146
-  printf("\n");
-
-  
-
-
-
-
-
-  unsigned char pk[LSAGS_PK_SIZE];
+  unsigned char pks[2*LSAGS_PK_SIZE];
   unsigned char sk[LSAGS_SK_SIZE];
-  unsigned char *sig = calloc(1, LSAGS_PK_SIZE+LSAGS_SK_SIZE+LSAGS_SK_SIZE);;
+  if (!LSAGS_keygen(sk, pks)) goto err;
+  if (!LSAGS_keygen(sk, pks+LSAGS_PK_SIZE)) goto err;
+
+  unsigned char *sig = calloc(1, LSAGS_sig_size(sizeof(pks)));;
   if (sig == NULL) goto err;
 
-  if (!LSAGS_keygen(sk, pk)) goto err;
-  if(!LSAGS_sign(pk, LSAGS_PK_SIZE, sk, 0, "ABCD1234", 8, "FISH", 4, sig, NULL)) goto err;
-  if(!LSAGS_verify(pk, LSAGS_PK_SIZE, "ABCD1234", 8, "FISH", 4, sig, NULL)) printf("Verification failed :(\n");
+  if(!LSAGS_sign(pks, 2*LSAGS_PK_SIZE, sk, 1, "ABCD1234", 8, "FISH", 4, sig, NULL)) goto err;
+  if(!LSAGS_verify(pks, 2*LSAGS_PK_SIZE, "ABCD1234", 8, "FISH", 4, sig, NULL)) printf("Verification failed :(\n");
+  else printf("Signature verified ok :)\n");
   exit(0);
 err:
   exit(1);
