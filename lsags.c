@@ -1,3 +1,5 @@
+// gcc -O3 lsags.c keccak/*.c -lcrypto -o lsags
+
 #include <openssl/bn.h>
 #include <openssl/ec.h>
 #include <openssl/obj_mac.h>
@@ -185,11 +187,10 @@ int LSAGS_verify(const unsigned char* pks, const size_t pks_size, const unsigned
   EC_POINT *y_tilde=NULL, *h=NULL, *t=NULL, *z=NULL, *zz=NULL, *pk=NULL;
   BIGNUM *c=NULL, *q=NULL, *s=NULL;
   EC_GROUP* group=NULL;
-  int ret = 0;
+  int ret = 0, ctx_is_new = 0;
   if (pks_size % LSAGS_PK_SIZE) return 0;
   int n = pks_size / LSAGS_PK_SIZE;
 
-  int ctx_is_new = 0;
   if (ctx == NULL) {
     ctx = BN_CTX_new();
     ctx_is_new = 1;
@@ -237,7 +238,7 @@ err:
   EC_POINT_free(h);
   EC_POINT_free(y_tilde);
   EC_GROUP_free(group);
-  BN_CTX_end(ctx);
+  if (ctx) BN_CTX_end(ctx);
   if (ctx_is_new) BN_CTX_free(ctx);
   return ret;
 }
@@ -247,16 +248,15 @@ int LSAGS_sign(unsigned char* pks, size_t pks_size, unsigned char* sk, int pi, u
   BIGNUM *x_pi=NULL, *u=NULL, *q=NULL, *c=NULL, *s=NULL;
   EC_POINT *y_tilde=NULL, *h=NULL, *z=NULL, *zz=NULL, *pk=NULL, *t=NULL;
   EC_GROUP* group=NULL;
-  int ret = 0;
+  int ret = 0, ctx_is_new = 0;
   assert(pi >= 0);
-  if (pks_size%LSAGS_PK_SIZE) goto err;
-  int n = pks_size/LSAGS_PK_SIZE;
-  if (pi >= n) goto err;
+  if (pks_size % LSAGS_PK_SIZE) return 0;
+  int n = pks_size / LSAGS_PK_SIZE;
+  if (pi >= n) return 0;
 
-  int ctx_is_new = 0;
   if (ctx == NULL) {
-    ctx = BN_CTX_new();
     ctx_is_new = 1;
+    ctx = BN_CTX_new();
   }
   if (ctx == NULL) goto err;
   BN_CTX_start(ctx);
@@ -278,7 +278,7 @@ int LSAGS_sign(unsigned char* pks, size_t pks_size, unsigned char* sk, int pi, u
   zz = EC_POINT_new(group); if (zz == NULL) goto err;
   pk = EC_POINT_new(group); if (pk == NULL) goto err;
 
-  BN_bin2bn(sk, LSAGS_SK_SIZE, x_pi); // FIXME: error handling?
+  BN_bin2bn(sk, LSAGS_SK_SIZE, x_pi);
   LSAGS_h_MACRO;
 
   // y_tilde = h**x_pi
@@ -297,7 +297,10 @@ int LSAGS_sign(unsigned char* pks, size_t pks_size, unsigned char* sk, int pi, u
   LSAGS_c_combine_MACRO;
   if (pi == n-1) if (!BN_bn2bin_be(c, sig_out + LSAGS_PK_SIZE, LSAGS_SK_SIZE)) goto err;
 
-  int i; for (i = pi+1; i != pi; i = (i + 1) % n) {
+  int i = pi;
+  while ((i = (i+1)%n) != pi) {
+    assert(0 <= i);
+    assert(i < n);
     if (!BN_rand_range(s, q)) goto err;
     if (!BN_bn2bin_be(s, sig_out + LSAGS_PK_SIZE + (1+i)*LSAGS_SK_SIZE, LSAGS_SK_SIZE)) goto err;
     LSAGS_c_round_MACRO;
@@ -311,7 +314,7 @@ int LSAGS_sign(unsigned char* pks, size_t pks_size, unsigned char* sk, int pi, u
 
   ret = 1;
 err:
-  BN_CTX_end(ctx);
+  if (ctx) BN_CTX_end(ctx);
   if (ctx_is_new) BN_CTX_free(ctx);
   EC_POINT_free(y_tilde);
   EC_POINT_free(pk);
@@ -323,27 +326,28 @@ err:
   return ret;
 }
 
-size_t LSAGS_sig_size(const size_t pks_size) {
-  return LSAGS_PK_SIZE + LSAGS_SK_SIZE * (1+(pks_size/LSAGS_PK_SIZE));
+size_t LSAGS_sig_size(const int n) {
+  return LSAGS_PK_SIZE + LSAGS_SK_SIZE * (1+n);
 }
 
 
 
-int main () {
-  unsigned char pks[2*LSAGS_PK_SIZE];
-  unsigned char sk[LSAGS_SK_SIZE];
-  if (!LSAGS_keygen(sk, pks+LSAGS_PK_SIZE)) goto err;
-  if (!LSAGS_keygen(sk, pks)) goto err;
+#define N 10
+unsigned char sks[N*LSAGS_SK_SIZE];
+unsigned char pks[N*LSAGS_PK_SIZE];
 
-  unsigned char *sig = calloc(1, LSAGS_sig_size(sizeof(pks)));;
+int main () {
+  unsigned char *sig = calloc(LSAGS_sig_size(N),1);
   if (sig == NULL) goto err;
 
-  int j; for (j=0; j<1000;++j) {
-    int i; for (i=0; i<100; ++i) {
-      if(!LSAGS_sign(pks, 2*LSAGS_PK_SIZE, sk, 0, "ABCD1234", 8, "FISH", 4, sig, NULL)) goto err;
-      if(!LSAGS_verify(pks, 2*LSAGS_PK_SIZE, "ABCD1234", 8, "FISH", 4, sig, NULL)) assert(0);
-    }
-    printf("%d\n",100*(j+1));
+  int i;
+  for (i=0; i<N; ++i) {
+    if (!LSAGS_keygen(sks+i*LSAGS_SK_SIZE, pks+i*LSAGS_PK_SIZE)) goto err;
+  }
+
+  for (i=0; i<N; ++i) {
+    if(!LSAGS_sign(pks, sizeof(pks), sks+i*LSAGS_SK_SIZE, i, "ABCD1234", 8, "FISH", 4, sig, NULL)) goto err;
+    if(!LSAGS_verify(pks, sizeof(pks), "ABCD1234", 8, "FISH", 4, sig, NULL)) assert(0);
   }
   exit(0);
 err:
