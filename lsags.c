@@ -95,11 +95,8 @@ char* global_BAD_point_printing_string;
 
 int BN_bn2bin_be(const BIGNUM *a, unsigned char *to, int len) {
   int offset = len - BN_num_bytes(a);
-  if (offset < 0) return 0;
-  int i; for (i=0; i<offset; ++i) to[i] = 0;
-  i = BN_bn2bin(a, to);
-  assert(offset + i == len);
-  return len;
+  while (offset--) *to++ = '\0';
+  return(BN_bn2bin(a, to));
 }
 
 int LSAGS_keygen(unsigned char* sk, unsigned char* pk) {
@@ -162,21 +159,19 @@ int LSAGS_hLym(unsigned char* hLym, const int n, const unsigned char* pks,
   Absorb(&hash_ctx, z_raw, 8*LSAGS_PK_SIZE);\
   Absorb(&hash_ctx, zz_raw, 8*LSAGS_PK_SIZE);\
   if(!BN_keccak_range(c, q, &hash_ctx)) goto err;\
-  BN_print_fp(stdout, c), printf(" %d\n",(i+1)%n);\
 } while (0)
 
 // c = group.hash((  hLym,    g**s * pk_i**c,   h**s * y_tilde**c  ))
 #define LSAGS_c_round_MACRO do {\
-    if(!EC_POINT_oct2point(group, pk, pks + i*LSAGS_PK_SIZE, LSAGS_PK_SIZE, ctx)) goto err;\
-    if(!EC_POINT_mul(group, z, s, pk, c, ctx)) goto err;\
-    if(!EC_POINT_mul(group, t, NULL, h, s, ctx)) goto err;\
-    if(!EC_POINT_mul(group, zz, NULL, y_tilde, c, ctx)) goto err;\
-    if(!EC_POINT_add(group, zz, zz, t, ctx)) goto err;\
-    LSAGS_c_combine_MACRO;\
+  if(!EC_POINT_oct2point(group, pk, pks + i*LSAGS_PK_SIZE, LSAGS_PK_SIZE, ctx)) goto err;\
+  if(!EC_POINT_mul(group, z, s, pk, c, ctx)) goto err;\
+  if(!EC_POINT_mul(group, t, NULL, h, s, ctx)) goto err;\
+  if(!EC_POINT_mul(group, zz, NULL, y_tilde, c, ctx)) goto err;\
+  if(!EC_POINT_add(group, zz, zz, t, ctx)) goto err;\
+  LSAGS_c_combine_MACRO;\
 } while (0)
 
 int LSAGS_verify(const unsigned char* pks, const size_t pks_size, const unsigned char* msg, const size_t msg_size, const unsigned char* tag, const unsigned char tag_size, const unsigned char* sig, BN_CTX* ctx) {
-  printf("VERIFY\n");
   EC_POINT *y_tilde=NULL, *h=NULL, *t=NULL, *z=NULL, *zz=NULL, *pk=NULL;
   BIGNUM *c=NULL, *q=NULL, *s=NULL;
   EC_GROUP* group=NULL;
@@ -239,7 +234,6 @@ err:
 }
 
 int LSAGS_sign(unsigned char* pks, size_t pks_size, unsigned char* sk, int pi, unsigned char* msg, size_t msg_size, unsigned char* tag, unsigned char tag_size, unsigned char* sig_out, BN_CTX* ctx) {
-  printf("SIGN\n");
   BIGNUM *x_pi=NULL, *u=NULL, *q=NULL, *c=NULL, *s=NULL;
   EC_POINT *y_tilde=NULL, *h=NULL, *z=NULL, *zz=NULL, *pk=NULL, *t=NULL;
   EC_GROUP* group=NULL;
@@ -337,8 +331,11 @@ int main () {
   unsigned char *sig = calloc(1, LSAGS_sig_size(sizeof(pks)));;
   if (sig == NULL) goto err;
 
-  int i; for (i=0; i<1000; ++i) {
-    if(!LSAGS_sign(pks, 2*LSAGS_PK_SIZE, sk, 0, "ABCD1234", 8, "FISH", 4, sig, NULL)) goto err;
+  int j; for (j=0; j<1000;++j) {
+    int i; for (i=0; i<100; ++i) {
+      if(!LSAGS_sign(pks, 2*LSAGS_PK_SIZE, sk, 0, "ABCD1234", 8, "FISH", 4, sig, NULL)) goto err;
+    }
+    printf("%d\n",100*j);
   }
   exit(0);
 err:
