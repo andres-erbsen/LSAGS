@@ -17,9 +17,12 @@
 
 #define LSAGS_CURVE_NID NID_secp224r1
 
+
+
 /* deterministic random number r:  0 <= r < range */
-int BN_keccak_range(BIGNUM* r, const BIGNUM* range, const spongeState* hash_ctx) {
-  int ret = 0;
+int BN_keccak_range(BIGNUM* r, const BIGNUM *range, const spongeState *hash_ctx) {
+  int ret = 0, bytes = 0;
+  unsigned char *buf = NULL;
   if (range->neg || BN_is_zero(range)) goto err;
   if (!BN_one(r)) goto err;
   if (!BN_sub(r,range,r)) goto err; // r = rand-1
@@ -27,10 +30,10 @@ int BN_keccak_range(BIGNUM* r, const BIGNUM* range, const spongeState* hash_ctx)
   if (bits == 0) { // range = 1; r = 0
     return 1;
   }
-	int bytes = (bits+7)/8;
+	bytes = (bits+7)/8;
 	unsigned char mask = ~(0xff<<((bits-1)%8 + 1));
 
-  unsigned char *buf = OPENSSL_malloc(bytes);
+  buf = OPENSSL_malloc(bytes);
   if (buf == NULL) goto err;
   
   unsigned char i = 0;
@@ -50,8 +53,10 @@ err:
   return ret;
 }
 
-int EC_POINT_keccak(const EC_GROUP *group, EC_POINT *point, const spongeState* hash_ctx, BN_CTX* ctx) {
-  int ret = 0;
+
+int EC_POINT_keccak(const EC_GROUP *group, EC_POINT *point, const spongeState *hash_ctx, BN_CTX* ctx) {
+  int ret = 0, bytes = 0;
+  unsigned char *buf = NULL;
   BIGNUM *range=NULL, *a=NULL, *b=NULL;
   BN_CTX_start(ctx);
   range = BN_CTX_get(ctx);
@@ -65,10 +70,10 @@ int EC_POINT_keccak(const EC_GROUP *group, EC_POINT *point, const spongeState* h
   if (!BN_one(a)) goto err;
   if (!BN_sub(a,range,a)) goto err; // r = rand-1
   int bits = BN_num_bits(a);
-	int bytes = (bits+7)/8 + 1; // +1 for encoding / y sign byte
+	bytes = (bits+7)/8 + 1; // +1 for encoding / y sign byte
 	unsigned char mask = ~(0xff<<((bits-1)%8 + 1));
   
-  unsigned char *buf = OPENSSL_malloc(bytes);
+  buf = OPENSSL_malloc(bytes);
   if (buf == NULL) goto err;
 
   unsigned char i = 0;
@@ -90,14 +95,14 @@ err:
   return ret;
 }
 
-char* global_BAD_point_printing_string;
-#define printpoint(p) global_BAD_point_printing_string = EC_POINT_point2hex(group, p, POINT_CONVERSION_COMPRESSED, ctx), printf("%s\n", global_BAD_point_printing_string), OPENSSL_free(global_BAD_point_printing_string)
 
 int BN_bn2bin_be(const BIGNUM *a, unsigned char *to, int len) {
   int offset = len - BN_num_bytes(a);
   while (offset--) *to++ = '\0';
-  return(BN_bn2bin(a, to));
+  BN_bn2bin(a, to);
+  return len;
 }
+
 
 int LSAGS_keygen(unsigned char* sk, unsigned char* pk) {
   int ret = 0;
@@ -119,15 +124,16 @@ err:
   return ret;
 }
 
+
 // hLym = hash(( pks, y_tilde, m ))
 int LSAGS_hLym(unsigned char* hLym, const int n, const unsigned char* pks,
                const size_t pks_size, const unsigned char* y_tilde_raw,
                const unsigned char* msg, const size_t msg_size) {
   spongeState hash_ctx;
   InitSponge(&hash_ctx, LSAGS_KECCAK_r, LSAGS_KECCAK_c);
-  char n_le[4]; // little-endian size of pks
+  unsigned char n_le[4]; // little-endian # of pks, make the encoding reversible
   n_le[0]=n&0xff; n_le[1]=(n>>8)&0xff; n_le[2]=(n>>16)&0xff; n_le[3]=(n>>24)&0xff;
-  Absorb(&hash_ctx, n_le, 8*4); // reversible encoding...
+  Absorb(&hash_ctx, n_le, 8*4);
   Absorb(&hash_ctx, pks, 8*pks_size);
   Absorb(&hash_ctx, y_tilde_raw, 8*LSAGS_PK_SIZE);
   Absorb(&hash_ctx, msg, 8*msg_size);
@@ -135,16 +141,18 @@ int LSAGS_hLym(unsigned char* hLym, const int n, const unsigned char* pks,
   return 1;
 }
 
+
 // h = group.hash((tag, pks), G)
 #define LSAGS_h_MACRO do {\
   spongeState hash_ctx;\
   InitSponge(&hash_ctx, LSAGS_KECCAK_r, LSAGS_KECCAK_c);\
-  Absorb(&hash_ctx, "G", 8); /* "independent hashing" */ \
+  Absorb(&hash_ctx, "G", 8); /* different from other hashes here*/ \
   Absorb(&hash_ctx, &tag_size, 8);\
   Absorb(&hash_ctx, tag, 8*tag_size);\
   Absorb(&hash_ctx, pks, 8*pks_size);\
   if(!EC_POINT_keccak(group, h, &hash_ctx, ctx)) goto err;\
 } while (0)
+
 
 // c = group.hash(( hLym, z, zz ))
 #define LSAGS_c_combine_MACRO do {\
@@ -161,6 +169,7 @@ int LSAGS_hLym(unsigned char* hLym, const int n, const unsigned char* pks,
   if(!BN_keccak_range(c, q, &hash_ctx)) goto err;\
 } while (0)
 
+
 // c = group.hash((  hLym,    g**s * pk_i**c,   h**s * y_tilde**c  ))
 #define LSAGS_c_round_MACRO do {\
   if(!EC_POINT_oct2point(group, pk, pks + i*LSAGS_PK_SIZE, LSAGS_PK_SIZE, ctx)) goto err;\
@@ -171,13 +180,14 @@ int LSAGS_hLym(unsigned char* hLym, const int n, const unsigned char* pks,
   LSAGS_c_combine_MACRO;\
 } while (0)
 
+
 int LSAGS_verify(const unsigned char* pks, const size_t pks_size, const unsigned char* msg, const size_t msg_size, const unsigned char* tag, const unsigned char tag_size, const unsigned char* sig, BN_CTX* ctx) {
   EC_POINT *y_tilde=NULL, *h=NULL, *t=NULL, *z=NULL, *zz=NULL, *pk=NULL;
   BIGNUM *c=NULL, *q=NULL, *s=NULL;
   EC_GROUP* group=NULL;
   int ret = 0;
-  if (pks_size%LSAGS_PK_SIZE) return 0;
-  int n = pks_size/LSAGS_PK_SIZE;
+  if (pks_size % LSAGS_PK_SIZE) return 0;
+  int n = pks_size / LSAGS_PK_SIZE;
 
   int ctx_is_new = 0;
   if (ctx == NULL) {
@@ -202,14 +212,13 @@ int LSAGS_verify(const unsigned char* pks, const size_t pks_size, const unsigned
 
   LSAGS_h_MACRO;
   if (!EC_POINT_oct2point(group, y_tilde, sig, LSAGS_PK_SIZE, ctx)) goto err;
-  BN_bin2bn(sig+LSAGS_PK_SIZE, LSAGS_SK_SIZE, c); // FIXME: error handling?
+  BN_bin2bn(sig + LSAGS_PK_SIZE, LSAGS_SK_SIZE, c);
 
   unsigned char hLym[LSAGS_HASH_SIZE];
   if (!LSAGS_hLym(hLym, n, pks, pks_size, sig, msg, msg_size)) goto err;
 
   int i; for (i=0; i<n; ++i) {
-    // FIXME: error handling?
-    BN_bin2bn(sig+ LSAGS_PK_SIZE + (1+i)*LSAGS_SK_SIZE, LSAGS_SK_SIZE, s); 
+    BN_bin2bn(sig + LSAGS_PK_SIZE + (1+i)*LSAGS_SK_SIZE, LSAGS_SK_SIZE, s); 
     LSAGS_c_round_MACRO;
   }
 
@@ -217,8 +226,8 @@ int LSAGS_verify(const unsigned char* pks, const size_t pks_size, const unsigned
   if (!BN_bn2bin_be(c, computed_c_raw, LSAGS_SK_SIZE)) goto err;
 
   ret = 1;
-  for (i=0; i<LSAGS_SK_SIZE; ++i) ret &= (computed_c_raw[i] == (sig+LSAGS_PK_SIZE)[i]);
-  assert(ret);
+  for (i=0; i<LSAGS_SK_SIZE; ++i)
+    ret &= (computed_c_raw[i] == sig[LSAGS_PK_SIZE+i]);
 
 err:
   EC_POINT_free(pk);
@@ -233,7 +242,8 @@ err:
   return ret;
 }
 
-int LSAGS_sign(unsigned char* pks, size_t pks_size, unsigned char* sk, int pi, unsigned char* msg, size_t msg_size, unsigned char* tag, unsigned char tag_size, unsigned char* sig_out, BN_CTX* ctx) {
+
+int LSAGS_sign(unsigned char* pks, size_t pks_size, unsigned char* sk, int pi, unsigned char* msg, size_t msg_size, unsigned char* tag, const unsigned char tag_size, unsigned char* sig_out, BN_CTX* ctx) {
   BIGNUM *x_pi=NULL, *u=NULL, *q=NULL, *c=NULL, *s=NULL;
   EC_POINT *y_tilde=NULL, *h=NULL, *z=NULL, *zz=NULL, *pk=NULL, *t=NULL;
   EC_GROUP* group=NULL;
@@ -281,17 +291,16 @@ int LSAGS_sign(unsigned char* pks, size_t pks_size, unsigned char* sk, int pi, u
 
   if (!BN_rand_range(u, q)) goto err;
 
-  int i = pi;
 
   if (!EC_POINTs_mul(group, z, u, 0, NULL, NULL, ctx)) goto err; // z = g**u
   if(!EC_POINT_mul(group, zz, NULL, h, u, ctx)) goto err; // zz = h**u
-  LSAGS_c_combine_MACRO; // this is sometimes computed ok
+  LSAGS_c_combine_MACRO;
   if (pi == n-1) if (!BN_bn2bin_be(c, sig_out + LSAGS_PK_SIZE, LSAGS_SK_SIZE)) goto err;
 
-  while ((i = (i+1)%n) != pi) {
+  int i; for (i = pi+1; i != pi; i = (i + 1) % n) {
     if (!BN_rand_range(s, q)) goto err;
     if (!BN_bn2bin_be(s, sig_out + LSAGS_PK_SIZE + (1+i)*LSAGS_SK_SIZE, LSAGS_SK_SIZE)) goto err;
-    LSAGS_c_round_MACRO; // but even these times, this may not be
+    LSAGS_c_round_MACRO;
     if (i == n-1) if (!BN_bn2bin_be(c, sig_out + LSAGS_PK_SIZE, LSAGS_SK_SIZE)) goto err;
   }
 
@@ -299,8 +308,6 @@ int LSAGS_sign(unsigned char* pks, size_t pks_size, unsigned char* sk, int pi, u
   if (!BN_mod_mul(s, x_pi, c, q, ctx)) goto err;
   if (!BN_mod_sub_quick(s, u, s, q)) goto err;
   if (!BN_bn2bin_be(s, sig_out + LSAGS_PK_SIZE + (1+pi)*LSAGS_SK_SIZE, LSAGS_SK_SIZE)) goto err;
-
-  LSAGS_verify(pks, pks_size, msg, msg_size, tag, tag_size, sig_out, NULL);
 
   ret = 1;
 err:
@@ -334,8 +341,9 @@ int main () {
   int j; for (j=0; j<1000;++j) {
     int i; for (i=0; i<100; ++i) {
       if(!LSAGS_sign(pks, 2*LSAGS_PK_SIZE, sk, 0, "ABCD1234", 8, "FISH", 4, sig, NULL)) goto err;
+      if(!LSAGS_verify(pks, 2*LSAGS_PK_SIZE, "ABCD1234", 8, "FISH", 4, sig, NULL)) assert(0);
     }
-    printf("%d\n",100*j);
+    printf("%d\n",100*(j+1));
   }
   exit(0);
 err:
