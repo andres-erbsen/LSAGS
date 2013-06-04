@@ -1,4 +1,5 @@
 // gcc -O3 lsags.c keccak/*.c -lcrypto -o lsags
+// Written by Andres Erbsen, distributed under GPLv3 with the OpenSSL exception
 
 #include <openssl/bn.h>
 #include <openssl/ec.h>
