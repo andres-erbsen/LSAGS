@@ -1,5 +1,6 @@
-// gcc -O3 lsags.c keccak/*.c -lcrypto -o lsags
 // Written by Andres Erbsen, distributed under GPLv3 with the OpenSSL exception
+
+#include "lsags.h"
 
 #include <openssl/bn.h>
 #include <openssl/ec.h>
@@ -9,17 +10,6 @@
 
 #include <stdio.h>
 #include <assert.h>
-
-#define LSAGS_SK_SIZE 28
-#define LSAGS_PK_SIZE 29
-#define LSAGS_HASH_SIZE 32
-
-// keccak parameters: the default, more conservative than the 256-bit proposal
-#define LSAGS_KECCAK_r 1024
-#define LSAGS_KECCAK_c (1600-LSAGS_KECCAK_r)
-
-#define LSAGS_CURVE_NID NID_secp224r1
-
 
 
 /* deterministic random number r:  0 <= r < range */
@@ -329,28 +319,4 @@ err:
 
 size_t LSAGS_sig_size(const int n) {
   return LSAGS_PK_SIZE + LSAGS_SK_SIZE * (1+n);
-}
-
-
-
-#define N 10
-unsigned char sks[N*LSAGS_SK_SIZE];
-unsigned char pks[N*LSAGS_PK_SIZE];
-
-int main () {
-  unsigned char *sig = calloc(LSAGS_sig_size(N),1);
-  if (sig == NULL) goto err;
-
-  int i;
-  for (i=0; i<N; ++i) {
-    if (!LSAGS_keygen(sks+i*LSAGS_SK_SIZE, pks+i*LSAGS_PK_SIZE)) goto err;
-  }
-
-  for (i=0; i<N; ++i) {
-    if(!LSAGS_sign(pks, sizeof(pks), sks+i*LSAGS_SK_SIZE, i, "ABCD1234", 8, "FISH", 4, sig, NULL)) goto err;
-    if(!LSAGS_verify(pks, sizeof(pks), "ABCD1234", 8, "FISH", 4, sig, NULL)) assert(0);
-  }
-  exit(0);
-err:
-  exit(1);
 }
