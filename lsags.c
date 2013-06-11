@@ -235,15 +235,13 @@ err:
 }
 
 
-int LSAGS_sign(unsigned char* pks, size_t pks_size, unsigned char* sk, int pi, unsigned char* msg, size_t msg_size, unsigned char* tag, const unsigned char tag_size, unsigned char* sig_out, BN_CTX* ctx) {
+int LSAGS_sign(unsigned char* pks, size_t pks_size, unsigned char* sk, unsigned char* msg, size_t msg_size, unsigned char* tag, const unsigned char tag_size, unsigned char* sig_out, BN_CTX* ctx) {
   BIGNUM *x_pi=NULL, *u=NULL, *q=NULL, *c=NULL, *s=NULL;
   EC_POINT *y_tilde=NULL, *h=NULL, *z=NULL, *zz=NULL, *pk=NULL, *t=NULL;
   EC_GROUP* group=NULL;
   int ret = 0, ctx_is_new = 0;
-  assert(pi >= 0);
   if (pks_size % LSAGS_PK_SIZE) return 0;
   int n = pks_size / LSAGS_PK_SIZE;
-  if (pi >= n) return 0;
 
   if (ctx == NULL) {
     ctx_is_new = 1;
@@ -270,6 +268,21 @@ int LSAGS_sign(unsigned char* pks, size_t pks_size, unsigned char* sk, int pi, u
   pk = EC_POINT_new(group); if (pk == NULL) goto err;
 
   BN_bin2bn(sk, LSAGS_SK_SIZE, x_pi);
+  if (!EC_POINT_mul(group, pk, x_pi, NULL, NULL, ctx)) goto err;
+  char our_pk_raw[LSAGS_PK_SIZE];
+  if (!EC_POINT_point2oct(group, pk, POINT_CONVERSION_COMPRESSED,
+        our_pk_raw, LSAGS_PK_SIZE, ctx)) goto err;
+  int pi = -1;
+  int j; for (j=0; j<n; ++j) {
+    if (!memcmp(our_pk_raw, pks+j*LSAGS_PK_SIZE, LSAGS_PK_SIZE)) {
+      pi = j;
+      break;
+    }
+  }
+  if (pi < 0) goto err;
+  if (pi >= n) goto err;
+
+
   LSAGS_h_MACRO;
 
   // y_tilde = h**x_pi
