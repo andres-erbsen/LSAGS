@@ -19,9 +19,19 @@ extern "C" {
 
 int LSAGS_keygen(unsigned char* sk, unsigned char* pk);
 
-int LSAGS_verify(const unsigned char* pks, const size_t pks_size, const unsigned char* msg, const size_t msg_size, const unsigned char* tag, const unsigned char tag_size, const unsigned char* sig, BN_CTX* ctx);
+int LSAGS_verify(
+const unsigned char* pks, const size_t pks_size,
+const unsigned char* msg, const size_t msg_size,
+const unsigned char* tag, const size_t tag_size,
+const unsigned char* sig, const size_t sig_size,
+BN_CTX* ctx);
 
-int LSAGS_sign(unsigned char* pks, size_t pks_size, unsigned char* sk, unsigned char* msg, size_t msg_size, unsigned char* tag, const unsigned char tag_size, unsigned char* sig_out, BN_CTX* ctx);
+int LSAGS_sign(
+unsigned char* pks, const size_t pks_size,
+unsigned char* sk,
+unsigned char* msg, const size_t msg_size,
+unsigned char* tag, const size_t tag_size,
+unsigned char* sig_out, BN_CTX* ctx);
 
 size_t LSAGS_sig_size(const int n);
 

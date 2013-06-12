@@ -140,7 +140,10 @@ int LSAGS_hLym(unsigned char* hLym, const int n, const unsigned char* pks,
   spongeState hash_ctx;\
   InitSponge(&hash_ctx, LSAGS_KECCAK_r, LSAGS_KECCAK_c);\
   Absorb(&hash_ctx, "G", 8); /* different from other hashes here*/ \
-  Absorb(&hash_ctx, &tag_size, 8);\
+  unsigned char ts_le[4]; /*little-endian tag size*/\
+  ts_le[0]=tag_size&0xff; ts_le[1]=(tag_size>>8)&0xff;\
+  ts_le[2]=(tag_size>>16)&0xff; ts_le[3]=(tag_size>>24)&0xff;\
+  Absorb(&hash_ctx, ts_le, 32);\
   Absorb(&hash_ctx, tag, 8*tag_size);\
   Absorb(&hash_ctx, pks, 8*pks_size);\
   if(!EC_POINT_keccak(group, h, &hash_ctx, ctx)) goto err;\
@@ -174,13 +177,18 @@ int LSAGS_hLym(unsigned char* hLym, const int n, const unsigned char* pks,
 } while (0)
 
 
-int LSAGS_verify(const unsigned char* pks, const size_t pks_size, const unsigned char* msg, const size_t msg_size, const unsigned char* tag, const unsigned char tag_size, const unsigned char* sig, BN_CTX* ctx) {
+size_t LSAGS_sig_size(const int n) {
+  return LSAGS_PK_SIZE + LSAGS_SK_SIZE * (1+n);
+}
+
+int LSAGS_verify(const unsigned char* pks, const size_t pks_size, const unsigned char* msg, const size_t msg_size, const unsigned char* tag, const size_t tag_size, const unsigned char* sig, const size_t sig_size, BN_CTX* ctx) {
   EC_POINT *y_tilde=NULL, *h=NULL, *t=NULL, *z=NULL, *zz=NULL, *pk=NULL;
   BIGNUM *c=NULL, *q=NULL, *s=NULL;
   EC_GROUP* group=NULL;
   int ret = 0, ctx_is_new = 0;
   if (pks_size % LSAGS_PK_SIZE) return 0;
   int n = pks_size / LSAGS_PK_SIZE;
+  if (LSAGS_sig_size(n) != sig_size) return 0;
 
   if (ctx == NULL) {
     ctx = BN_CTX_new();
@@ -235,7 +243,7 @@ err:
 }
 
 
-int LSAGS_sign(unsigned char* pks, size_t pks_size, unsigned char* sk, unsigned char* msg, size_t msg_size, unsigned char* tag, const unsigned char tag_size, unsigned char* sig_out, BN_CTX* ctx) {
+int LSAGS_sign(unsigned char* pks, size_t pks_size, unsigned char* sk, unsigned char* msg, size_t msg_size, unsigned char* tag, const size_t tag_size, unsigned char* sig_out, BN_CTX* ctx) {
   BIGNUM *x_pi=NULL, *u=NULL, *q=NULL, *c=NULL, *s=NULL;
   EC_POINT *y_tilde=NULL, *h=NULL, *z=NULL, *zz=NULL, *pk=NULL, *t=NULL;
   EC_GROUP* group=NULL;
@@ -330,6 +338,3 @@ err:
   return ret;
 }
 
-size_t LSAGS_sig_size(const int n) {
-  return LSAGS_PK_SIZE + LSAGS_SK_SIZE * (1+n);
-}

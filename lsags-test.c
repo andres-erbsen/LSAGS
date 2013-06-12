@@ -18,7 +18,7 @@ int main () {
 
   for (i=0; i<N; ++i) {
     if(!LSAGS_sign(pks, sizeof(pks), sks+i*LSAGS_SK_SIZE, "ABCD1234", 8, "FISH", 4, sig, NULL)) goto err;
-    if(!LSAGS_verify(pks, sizeof(pks), "ABCD1234", 8, "FISH", 4, sig, NULL)) assert(0);
+    if(!LSAGS_verify(pks, sizeof(pks), "ABCD1234", 8, "FISH", 4, sig, LSAGS_sig_size(N), NULL)) assert(0);
   }
   exit(0);
 err:
