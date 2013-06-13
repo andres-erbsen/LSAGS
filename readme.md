@@ -24,7 +24,11 @@ Dependencies
 
 Building
 --------
-    gcc -O3 lsags.c keccak/*.c -lcrypto -o lsags
+    gcc -c -O3 keccak/KeccakF-1600-opt32.c -o keccak/KeccakF-1600-opt32.o
+    gcc -c -O3 keccak/KeccakSponge.c -o keccak/KeccakSponge.o
+    gcc -c -O3 lsags.c -o lsags.o
+    gcc -O3 -o lsags-test lsags-test.c lsags.o keccak/KeccakSponge.o keccak/KeccakF-1600-opt32.o -lcrypto
+
 
 Performance
 -----------
